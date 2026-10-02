@@ -1,0 +1,11 @@
+# Fichiers de configuration sensibles
+config.php
+.env
+
+# Dossiers d'éditeurs / IDE
+.vscode/
+.idea/
+
+# Fichiers temporaires ou logs
+*.log
+uploads/
