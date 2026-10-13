@@ -1,407 +1,453 @@
-<?php 
-require_once '../config.php'; // ← DÉPLACÉ ICI : AVANT TOUT CODE HTML
-$id_agent_retour = $_GET['id_agent'] ?? 0; 
-?>
+<?php
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+require_once '../config.php';
 
+// Helpers d'affichage
+if (!function_exists('e')) {
+    function e($v) { return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8'); }
+}
+
+// Session et droits
+$id_session   = isset($_SESSION['id_fonc']) ? (int)$_SESSION['id_fonc'] : 0;
+$role_session = strtolower(trim($_SESSION['rol'] ?? ''));
+$est_admin    = in_array($role_session, ['admin', 'admin_local'], true);
+
+// Il faut être connecté
+if (!$id_session && !$est_admin) {
+    header('Location: ../saisie/login.php');
+    exit();
+}
+
+// Agent concerné : détection de l'identifiant (id, id_agent ou id_fonc), sinon celui de la session
+$id_agent = (int)($_GET['id'] ?? $_GET['id_agent'] ?? $_GET['id_fonc'] ?? 0);
+if (!$id_agent && !$est_admin) {
+    $id_agent = $id_session;
+}
+
+// Un agent ne peut ajouter des diplômes qu'à son propre dossier
+if (!$est_admin && $id_agent !== $id_session) {
+    header('Location: ../views/profil_agent.php?id=' . $id_session);
+    exit();
+}
+
+// Agent concerné
+$agent_diplome = null;
+if ($id_agent > 0) {
+    $stmt_agent = $db->prepare("SELECT id_fonc, nom_fonc, prenom_fonc, matri FROM FONCTIONNAIRE WHERE id_fonc = ?");
+    $stmt_agent->execute([$id_agent]);
+    $agent_diplome = $stmt_agent->fetch();
+}
+
+$nom_agent = $agent_diplome
+    ? trim(($agent_diplome['prenom_fonc'] ?? '') . ' ' . mb_strtoupper((string)($agent_diplome['nom_fonc'] ?? ''), 'UTF-8'))
+    : '';
+
+// Jeton CSRF (à vérifier dans traitement_diplome.php avec hash_equals)
+if (empty($_SESSION['csrf_dipl'])) {
+    $_SESSION['csrf_dipl'] = bin2hex(random_bytes(32));
+}
+$csrf = $_SESSION['csrf_dipl'];
+
+$annee_courante = (int)date('Y');
+
+if ($agent_diplome) {
+    $retour_url = '../views/profil_agent.php?id=' . (int)$agent_diplome['id_fonc'] . '&section=diplomes';
+} else {
+    $retour_url = $est_admin ? '../views/liste_fonctionnaires.php' : '../views/profil_agent.php?id=' . $id_session;
+}
+?>
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Saisie Diplôme | Ministère</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ajouter un diplôme | Ministère des Affaires étrangères</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { 
-            --primary: #0A2540;
-            --primary-dark: #051a2c;
-            --primary-light: #1a3d5c;
-            --success: #10B981;
-            --success-dark: #059669;
-            --accent: #F59E0B;
-            --bg: #F8FAFC;
-            --text: #1E293B;
-            --text-light: #64748B;
-            --border: #E2E8F0;
-            --white: #FFFFFF;
-            --shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.08);
-            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+        :root {
+            --ink: #0A3B2C;
+            --ink-2: #11553F;
+            --paper: #F2F6F3;
+            --surface: #FFFFFF;
+            --line: #E4E8EE;
+            --line-soft: #EEF1F5;
+            --text: #16222E;
+            --muted: #6A7686;
+            --accent: #F77F00;
+            --accent-dark: #C25F00;
+            --accent-soft: #FFEFD9;
+            --green: #0E9F68;
+            --green-soft: #DDF5EA;
+            --red: #C73A30;
+            --red-soft: #FBE9E7;
+            --font-ui: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+            --font-display: 'Instrument Serif', Georgia, 'Times New Roman', serif;
         }
 
-        * {
+        *, *::before, *::after { box-sizing: border-box; }
+        html { -webkit-text-size-adjust: 100%; }
+
+        body {
             margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body { 
-            font-family: 'Poppins', sans-serif; 
-            background: linear-gradient(135deg, var(--bg) 0%, #F1F5F9 100%);
-            margin: 0;
-            padding-top: 100px;
-            min-height: 100vh;
-        }
-
-        .container { 
-            display: flex; 
-            justify-content: center; 
-            align-items: center;
-            padding: 20px;
-        }
-
-        .form-container { 
-            background: var(--white); 
-            width: 100%; 
-            max-width: 680px; 
-            padding: 0;
-            border-radius: 28px; 
-            box-shadow: var(--shadow);
-            overflow: hidden;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        .form-container:hover {
-            box-shadow: 0 25px 45px -12px rgba(0, 0, 0, 0.15);
-        }
-
-        .form-header {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-            padding: 28px 32px;
-            text-align: center;
-            position: relative;
-        }
-
-        .form-header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: linear-gradient(90deg, var(--success), var(--accent), var(--success));
-        }
-
-        h2 { 
-            color: var(--white); 
-            margin: 0;
-            font-weight: 600;
-            font-size: 1.6rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 14px;
-        }
-
-        h2 i {
-            color: var(--accent);
-            font-size: 1.8rem;
-        }
-
-        .form-subtitle {
-            color: rgba(255,255,255,0.8);
-            font-size: 0.8rem;
-            margin-top: 8px;
-            letter-spacing: 0.5px;
-        }
-
-        .form-body {
-            padding: 32px;
-        }
-
-        .form-group { 
-            margin-bottom: 24px; 
-        }
-
-        /* Style pour masquer le champ personnalisé au départ */
-        .form-group-custom {
-            display: none;
-            margin-top: 12px;
-            animation: fadeIn 0.4s ease forwards;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-8px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        label { 
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            font-size: 0.8rem;
+            font-family: var(--font-ui);
+            font-size: 14px;
+            line-height: 1.5;
             color: var(--text);
-            letter-spacing: 0.3px;
-            text-transform: uppercase;
+            background: var(--paper);
+            -webkit-font-smoothing: antialiased;
         }
 
-        label i {
-            color: var(--accent);
-            width: 20px;
-            margin-right: 6px;
-        }
+        a { color: inherit; text-decoration: none; }
+        button, input, select { font: inherit; color: inherit; }
+        :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 
-        input, select { 
-            width: 100%; 
-            padding: 12px 16px; 
-            border: 2px solid var(--border); 
-            border-radius: 14px; 
-            font-size: 0.9rem;
-            font-family: 'Poppins', sans-serif;
-            transition: all 0.3s ease;
-            background: var(--white);
+        /* ---------- Barre du haut ---------- */
+        .topbar {
+            position: sticky; top: 0; z-index: 40;
+            display: flex; align-items: center; justify-content: space-between; gap: 16px;
+            padding: 12px 32px;
+            background: rgba(242,246,243,.88);
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid var(--line);
         }
+        .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .brand-mark { width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--ink); color: #fff; display: grid; place-items: center; font-size: 16px; }
+        .brand-name { font-weight: 700; font-size: 14px; line-height: 1.2; }
+        .brand-sub  { font-size: 12px; color: var(--muted); }
+        .topbar-right { display: flex; align-items: center; gap: 10px; }
+        .icon-btn { width: 38px; height: 38px; display: inline-grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 9px; color: var(--muted); transition: color .15s, border-color .15s, background .15s; }
+        .icon-btn.danger:hover { color: var(--red); border-color: #F0C4BF; background: var(--red-soft); }
 
-        input:hover, select:hover {
-            border-color: var(--accent);
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 10px 16px; border-radius: 9px; border: 1px solid transparent;
+            font-weight: 600; font-size: 13px; cursor: pointer;
+            transition: background .15s, border-color .15s, transform .1s, color .15s;
         }
+        .btn:active { transform: translateY(1px); }
+        .btn-primary { background: var(--accent); color: #fff; box-shadow: 0 6px 16px rgba(247,127,0,.3); }
+        .btn-primary:hover { background: #FF8F1F; }
+        .btn-ghost { background: var(--surface); border-color: var(--line); color: var(--muted); }
+        .btn-ghost:hover { color: var(--text); border-color: #CBD2DC; }
+        .btn.loading { pointer-events: none; opacity: .8; }
+        .btn .spin { display: none; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+        .btn.loading .spin { display: inline-block; }
+        .btn.loading .ico { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
 
-        input:focus, select:focus { 
-            outline: none; 
-            border-color: var(--success);
-            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
+        /* ---------- Page ---------- */
+        .page { max-width: 680px; margin: 0 auto; padding: 32px 24px 40px; }
+
+        .hero {
+            position: relative; overflow: hidden;
+            display: flex; align-items: center; gap: 18px;
+            margin-bottom: 24px; padding: 28px 28px 24px;
+            border-radius: 16px; color: #fff;
+            background:
+                radial-gradient(420px 200px at 100% 0%, rgba(247,127,0,.38), transparent 70%),
+                linear-gradient(120deg, #0A3B2C 0%, #11634A 100%);
         }
+        .hero::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 5px; background: linear-gradient(90deg, #F77F00 0 33.33%, #FFFFFF 33.33% 66.66%, #009E60 66.66% 100%); }
+        .hero-ico { flex: none; width: 56px; height: 56px; border-radius: 14px; display: grid; place-items: center; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); font-size: 22px; color: #FFB066; }
+        .hero h1 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: clamp(26px, 4vw, 36px); line-height: 1.05; letter-spacing: -.01em; }
+        .hero p { margin: 6px 0 0; color: rgba(255,255,255,.82); font-size: 14px; }
+        .hero p strong { color: #fff; }
 
-        .grid-2 {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
+        .alert { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; margin-bottom: 20px; border-radius: 10px; background: var(--red-soft); color: #8E2A22; border: 1px solid #F0C4BF; font-weight: 500; }
+        .alert i { margin-top: 3px; }
+
+        .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+        .panel-body { padding: 26px 26px 24px; }
+
+        .field { margin-bottom: 22px; }
+        .field > label, .field > .label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+        .req { color: var(--accent-dark); margin-left: 2px; }
+        .opt { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 4px; }
+        .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+        .err { margin-top: 6px; font-size: 12px; font-weight: 600; color: var(--red); }
+        .err:empty { display: none; }
+
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; }
+
+        .control {
+            width: 100%; height: 44px; padding: 0 14px;
+            background: var(--surface); border: 1px solid #D5DBE3; border-radius: 9px;
+            transition: border-color .15s, box-shadow .15s;
         }
+        select.control { appearance: none; cursor: pointer; padding-right: 36px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%236A7686' stroke-width='1.6' stroke-linecap='round' d='M2.5 4.5 6 8l3.5-3.5'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 14px center; }
+        .control::placeholder { color: #9AA5B3; }
+        .control:hover { border-color: #B9C2CE; }
+        .control:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(14,159,104,.15); }
+        .control.bad { border-color: var(--red); }
 
-        .file-drop-area {
-            position: relative;
-            display: flex;
-            align-items: center;
-            padding: 18px 20px;
-            border: 2px dashed var(--border);
-            border-radius: 16px;
-            background: var(--bg);
-            transition: all 0.3s ease;
-            cursor: pointer;
+        .custom-niveau { display: none; margin-top: 10px; }
+        .custom-niveau.show { display: block; }
+
+        /* Agent figé */
+        .agent-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
+        .agent-card .ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--green-soft); color: var(--green); }
+        .agent-card .name { font-weight: 700; line-height: 1.25; }
+        .agent-card .meta { color: var(--muted); font-size: 12px; }
+
+        /* Dépôt de fichier */
+        .dropzone { position: relative; display: block; text-align: center; padding: 22px 16px; border: 1.5px dashed #BAC4D0; border-radius: 12px; background: var(--paper); cursor: pointer; transition: border-color .15s, background .15s; }
+        .dropzone:hover, .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); }
+        .dropzone.ok  { border-color: var(--green); background: #F2FBF7; border-style: solid; }
+        .dropzone.bad { border-color: var(--red); background: var(--red-soft); }
+        .dz-ico { width: 40px; height: 40px; margin: 0 auto 8px; display: grid; place-items: center; border-radius: 11px; background: var(--surface); color: var(--accent); font-size: 17px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+        .dropzone.ok .dz-ico { color: var(--green); }
+        .dz-title { font-weight: 600; word-break: break-word; }
+        .dz-sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+        .dropzone input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+
+        .actions { display: flex; justify-content: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 8px; padding-top: 20px; border-top: 1px solid var(--line-soft); }
+
+        .empty { text-align: center; padding: 48px 24px; color: var(--muted); }
+        .empty .empty-ico { width: 64px; height: 64px; margin: 0 auto 16px; display: grid; place-items: center; border-radius: 50%; background: var(--paper); color: #B5BEC9; font-size: 26px; }
+        .empty strong { display: block; color: var(--text); font-size: 15px; margin-bottom: 4px; }
+        .empty p { margin: 0 auto 18px; max-width: 44ch; }
+
+        @media (max-width: 720px) {
+            .topbar { padding: 12px 16px; }
+            .brand-sub { display: none; }
+            .page { padding: 20px 16px 32px; }
+            .hero { padding: 24px 20px 20px; }
+            .panel-body { padding: 20px 16px; }
+            .grid2 { grid-template-columns: 1fr; }
+            .actions .btn { flex: 1; }
         }
-
-        .file-drop-area:hover { 
-            border-color: var(--accent); 
-            background: #FFFBEB;
-            transform: translateY(-2px);
-        }
-
-        .file-drop-area i { 
-            font-size: 1.8rem; 
-            color: var(--accent); 
-            margin-right: 15px; 
-        }
-
-        .file-msg { 
-            font-size: 0.85rem; 
-            color: var(--text-light);
-            font-weight: 500;
-        }
-
-        input[type="file"] { 
-            position: absolute; 
-            left: 0; 
-            top: 0; 
-            height: 100%; 
-            width: 100%;
-            opacity: 0; 
-            cursor: pointer;
-        }
-
-        button { 
-            width: 100%; 
-            padding: 16px; 
-            background: linear-gradient(135deg, var(--success) 0%, var(--success-dark) 100%);
-            color: white; 
-            border: none; 
-            border-radius: 16px; 
-            cursor: pointer; 
-            font-size: 1rem;
-            font-weight: 600;
-            transition: all 0.3s ease;
-            margin-top: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        button::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 0;
-            height: 0;
-            border-radius: 50%;
-            background: rgba(255,255,255,0.2);
-            transform: translate(-50%, -50%);
-            transition: width 0.6s, height 0.6s;
-        }
-
-        button:hover::before {
-            width: 300px;
-            height: 300px;
-        }
-
-        button:hover { 
-            transform: translateY(-2px);
-            box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.3);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        @media (max-width: 640px) { 
-            .grid-2 {
-                grid-template-columns: 1fr;
-                gap: 0;
-            }
-            .form-body {
-                padding: 24px;
-            }
-            .form-header {
-                padding: 22px 20px;
-            }
-            h2 {
-                font-size: 1.3rem;
-            }
-            h2 i {
-                font-size: 1.5rem;
-            }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { transition: none !important; animation: none !important; }
         }
     </style>
 </head>
 <body>
 
-<?php include '../views/includes/navbar.php'; ?>
-
-<div class="container">
-    <div class="form-container">
-        <div class="form-header">
-            <h2>
-                <i class="fa-solid fa-graduation-cap"></i> 
-                Nouveau Diplôme
-            </h2>
-            <div class="form-subtitle">Enregistrement des qualifications académiques</div>
-        </div>
-
-        <div class="form-body">
-            <form action="../actions/traitement_diplome.php" method="POST" enctype="multipart/form-data">
-                
-                <div class="form-group">
-    <label><i class="fa-solid fa-user-tie"></i> Agent Titulaire</label>
-    
-    <?php
-    // Détection automatique de l'ID (regarde 'id', puis 'id_agent', puis 'id_fonc')
-    $id_agent = $_GET['id'] ?? $_GET['id_agent'] ?? $_GET['id_fonc'] ?? 0;
-    $id_agent = (int)$id_agent;
-
-    $agent_diplome = null;
-    if ($id_agent > 0) {
-        // Récupération ciblée de l'agent actuel
-        $stmt_agent = $db->prepare("SELECT id_fonc, nom_fonc, prenom_fonc, matri FROM FONCTIONNAIRE WHERE id_fonc = ?");
-        $stmt_agent->execute([$id_agent]);
-        $agent_diplome = $stmt_agent->fetch();
-    }
-    ?>
-
-    <?php if ($agent_diplome): ?>
-        <input type="hidden" name="id_fonc" value="<?= $agent_diplome['id_fonc']; ?>">
-        
-        <div style="background-color: #E2E8F0; padding: 12px 14px; border-radius: 10px; font-weight: 600; color: #0A2540; border: 2px solid #CBD5E1; display: flex; align-items: center; gap: 10px;">
-            <i class="fa-solid fa-id-card" style="color: #D4AF37;"></i>
-            <?= strtoupper($agent_diplome['nom_fonc']) . " " . $agent_diplome['prenom_fonc'] . " (" . $agent_diplome['matri'] . ")"; ?>
-        </div>
-    <?php else: ?>
-        <div style="color: #EF4444; font-weight: 600; padding: 12px; background: #FEE2E2; border-radius: 10px;">
-            <i class="fa-solid fa-exclamation-triangle"></i> Erreur : Impossible de lier le diplôme. L'identifiant de l'agent est manquant dans l'URL.
-            <br><span style="font-size: 0.8rem; font-weight: normal; color: #7F1D1D;">(Vérifiez que votre bouton ressemble à : `ajouter_diplome.php?id=<?= $_GET['id'] ?? 'ID' ?>`)</span>
-        </div>
-    <?php endif; ?>
-</div>
-
-                <div class="form-group">
-                    <label><i class="fa-solid fa-certificate"></i> Désignation du Diplôme</label>
-                    <input type="text" name="libelle" placeholder="Ex: Master Professionnel en Informatique" required>
-                </div>
-
-                <div class="grid-2">
-                    <div class="form-group">
-                        <label><i class="fa-solid fa-layer-group"></i> Niveau</label>
-                        <select name="niveau" id="select-niveau" required>
-                            <option value="CEPC">CEPC</option>
-                            <option value="BEPC">BEPC</option>
-                            <option value="BAC">BAC</option>
-                            <option value="BAC+2">BTS / BAC+2</option>
-                            <option value="BAC+3">Licence / BAC+3</option>
-                            <option value="BAC+5">Master / BAC+5</option>
-                            <option value="Doctorat">Doctorat</option>
-                            <option value="Autre">Autre...</option>
-                        </select>
-
-                        <div class="form-group-custom" id="custom-niveau-container">
-                            <input type="text" name="niveau_custom" id="niveau-custom" placeholder="Précisez votre niveau (Ex: BAC+4)">
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label><i class="fa-solid fa-calendar-alt"></i> Année d'Obtention</label>
-                        <input type="number" name="annee" value="2026" required>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label><i class="fa-solid fa-file-pdf"></i> Scan du diplôme</label>
-                    <div class="file-drop-area">
-                        <i class="fa-solid fa-cloud-arrow-up"></i>
-                        <span class="file-msg" id="txt-fich">Cliquez ou glissez pour charger le fichier...</span>
-                        <input type="file" name="scan_diplome" accept=".pdf,image/*">
-                    </div>
-                </div>
-
-                <button type="submit">
-                    <i class="fa-solid fa-check-double"></i> Enregistrer et Archiver
-                </button>
-            </form>
+<header class="topbar">
+    <div class="brand">
+        <div class="brand-mark"><i class="fa-solid fa-building-columns"></i></div>
+        <div>
+            <div class="brand-name">Ministère des Affaires étrangères</div>
+            <div class="brand-sub">Ressources humaines</div>
         </div>
     </div>
-</div>
+    <div class="topbar-right">
+        <a href="<?= e($retour_url) ?>" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Retour au dossier</a>
+        <a href="../logout.php" class="icon-btn danger" title="Se déconnecter" aria-label="Se déconnecter"><i class="fa-solid fa-power-off"></i></a>
+    </div>
+</header>
+
+<main class="page">
+
+    <div class="hero">
+        <div class="hero-ico"><i class="fa-solid fa-graduation-cap"></i></div>
+        <div>
+            <h1>Ajouter un diplôme</h1>
+            <p>
+                <?php if ($agent_diplome): ?>
+                    Dossier de <strong><?= e($nom_agent) ?></strong> · Matricule <?= e($agent_diplome['matri']) ?>
+                <?php else: ?>
+                    Enregistrement d’une qualification académique
+                <?php endif; ?>
+            </p>
+        </div>
+    </div>
+
+    <?php if (isset($_GET['error'])): ?>
+        <div class="alert" role="alert">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span><?= e($_GET['error']) ?></span>
+        </div>
+    <?php endif; ?>
+
+    <?php if (!$agent_diplome): ?>
+
+        <section class="panel">
+            <div class="empty">
+                <div class="empty-ico"><i class="fa-solid fa-user-slash"></i></div>
+                <strong>Agent introuvable</strong>
+                <p>Impossible de rattacher un diplôme sans agent. Ouvrez cette page depuis le dossier de l’agent concerné.</p>
+                <a href="<?= e($retour_url) ?>" class="btn btn-ghost"><i class="fa-solid fa-arrow-left"></i> Retour</a>
+            </div>
+        </section>
+
+    <?php else: ?>
+
+    <section class="panel">
+        <form action="../actions/traitement_diplome.php" method="POST" enctype="multipart/form-data" id="diplForm" class="panel-body" novalidate>
+            <input type="hidden" name="csrf" value="<?= e($csrf) ?>">
+            <input type="hidden" name="id_fonc" value="<?= (int)$agent_diplome['id_fonc'] ?>">
+
+            <div class="field">
+                <span class="label">Agent titulaire</span>
+                <div class="agent-card">
+                    <div class="ico"><i class="fa-solid fa-id-card"></i></div>
+                    <div>
+                        <div class="name"><?= e($nom_agent) ?></div>
+                        <div class="meta">Matricule <?= e($agent_diplome['matri']) ?></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="libelle">Désignation du diplôme <span class="req">*</span></label>
+                <input class="control" type="text" id="libelle" name="libelle" maxlength="150" placeholder="Ex. : Master professionnel en informatique" autocomplete="off" required>
+                <div class="err" data-err="libelle"></div>
+            </div>
+
+            <div class="grid2">
+                <div class="field">
+                    <label for="select-niveau">Niveau <span class="req">*</span></label>
+                    <select class="control" name="niveau" id="select-niveau" required>
+                        <option value="CEPC">CEPC</option>
+                        <option value="BEPC">BEPC</option>
+                        <option value="BAC">BAC</option>
+                        <option value="BAC+2">BTS / BAC+2</option>
+                        <option value="BAC+3">Licence / BAC+3</option>
+                        <option value="BAC+5">Master / BAC+5</option>
+                        <option value="Doctorat">Doctorat</option>
+                        <option value="Autre">Autre…</option>
+                    </select>
+                    <div class="custom-niveau" id="custom-niveau-container">
+                        <input class="control" type="text" name="niveau_custom" id="niveau-custom" maxlength="40" placeholder="Précisez le niveau (ex. : BAC+4)" autocomplete="off">
+                    </div>
+                    <div class="err" data-err="niveau_custom"></div>
+                </div>
+
+                <div class="field">
+                    <label for="annee">Année d’obtention <span class="req">*</span></label>
+                    <input class="control" type="number" name="annee" id="annee" min="1950" max="<?= $annee_courante ?>" value="<?= $annee_courante ?>" inputmode="numeric" required>
+                    <div class="err" data-err="annee"></div>
+                </div>
+            </div>
+
+            <div class="field">
+                <span class="label">Scan du diplôme <span class="opt">facultatif</span></span>
+                <div class="dropzone" id="dropzone">
+                    <div class="dz-ico"><i class="fa-solid fa-cloud-arrow-up" id="dzIcon"></i></div>
+                    <div class="dz-title" id="dzTitle">Cliquez ou déposez un fichier</div>
+                    <div class="dz-sub" id="dzSub">PDF, JPG ou PNG, 5 Mo maximum</div>
+                    <input type="file" name="scan_diplome" id="scan" accept=".pdf,.jpg,.jpeg,.png" aria-label="Scan du diplôme">
+                </div>
+            </div>
+
+            <div class="actions">
+                <a href="<?= e($retour_url) ?>" class="btn btn-ghost">Annuler</a>
+                <button type="submit" class="btn btn-primary" id="submitBtn">
+                    <i class="fa-solid fa-box-archive ico"></i>
+                    <span class="spin"></span>
+                    <span>Enregistrer et archiver</span>
+                </button>
+            </div>
+        </form>
+    </section>
+
+    <?php endif; ?>
+
+</main>
 
 <script>
-    // Écouteur sur la liste déroulante Niveau
-    const selectNiveau = document.getElementById('select-niveau');
-    const customContainer = document.getElementById('custom-niveau-container');
-    const inputCustom = document.getElementById('niveau-custom');
+(function () {
+    const form = document.getElementById('diplForm');
+    if (!form) return;
 
-    selectNiveau.addEventListener('change', function() {
-        if (this.value === 'Autre') {
-            customContainer.style.display = 'block';
-            inputCustom.setAttribute('required', 'required');
-            inputCustom.focus();
-        } else {
-            customContainer.style.display = 'none';
-            inputCustom.removeAttribute('required');
-            inputCustom.value = ''; // Réinitialise la valeur si l'utilisateur change d'avis
-        }
+    const libelle = document.getElementById('libelle');
+    const select = document.getElementById('select-niveau');
+    const customBox = document.getElementById('custom-niveau-container');
+    const custom = document.getElementById('niveau-custom');
+    const annee = document.getElementById('annee');
+    const scan = document.getElementById('scan');
+    const dz = document.getElementById('dropzone');
+    const dzTitle = document.getElementById('dzTitle');
+    const dzSub = document.getElementById('dzSub');
+    const dzIcon = document.getElementById('dzIcon');
+    const submitBtn = document.getElementById('submitBtn');
+    const MAX = 5 * 1024 * 1024;
+    const EXT = ['pdf', 'jpg', 'jpeg', 'png'];
+    const MAX_YEAR = <?= $annee_courante ?>;
+    let submitting = false;
+
+    function showError(name, msg) {
+        const box = form.querySelector('[data-err="' + name + '"]');
+        if (box) box.textContent = msg;
+        const input = form.elements[name];
+        if (input && input.classList) input.classList.add('bad');
+    }
+    function clearError(name) {
+        const box = form.querySelector('[data-err="' + name + '"]');
+        if (box) box.textContent = '';
+        const input = form.elements[name];
+        if (input && input.classList) input.classList.remove('bad');
+    }
+
+    // Niveau « Autre » : champ personnalisé
+    select.addEventListener('change', () => {
+        const autre = select.value === 'Autre';
+        customBox.classList.toggle('show', autre);
+        if (autre) { custom.focus(); }
+        else { custom.value = ''; clearError('niveau_custom'); }
     });
 
-    // Gestion visuelle du fichier chargé
-    const fileInput = document.querySelector('input[type="file"]');
-    const fileMsg = document.getElementById('txt-fich');
-    
-    if(fileInput) {
-        fileInput.addEventListener('change', function() {
-            if(this.files.length > 0) {
-                const fileName = this.files[0].name;
-                const fileSize = (this.files[0].size / 1024).toFixed(1);
-                fileMsg.innerHTML = `<i class="fa-solid fa-check-circle" style="color:#10B981"></i> ${fileName} (${fileSize} Ko)`;
-            } else {
-                fileMsg.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Cliquez ou glissez pour charger le fichier...';
-            }
-        });
-    }
-</script>
+    ['libelle', 'niveau_custom', 'annee'].forEach(n => {
+        form.elements[n].addEventListener('input', () => clearError(n));
+    });
 
+    // Fichier : contrôle, puis affichage sans injecter de HTML
+    function resetDrop() {
+        dz.classList.remove('ok', 'bad');
+        dzTitle.textContent = 'Cliquez ou déposez un fichier';
+        dzSub.textContent = 'PDF, JPG ou PNG, 5 Mo maximum';
+        dzIcon.className = 'fa-solid fa-cloud-arrow-up';
+    }
+    scan.addEventListener('change', () => {
+        const f = scan.files && scan.files[0];
+        if (!f) { resetDrop(); return; }
+        const ext = (f.name.split('.').pop() || '').toLowerCase();
+        if (!EXT.includes(ext)) {
+            scan.value = ''; resetDrop(); dz.classList.add('bad');
+            dzSub.textContent = 'Format non pris en charge. Utilisez PDF, JPG ou PNG.';
+            return;
+        }
+        if (f.size > MAX) {
+            scan.value = ''; resetDrop(); dz.classList.add('bad');
+            dzSub.textContent = 'Fichier trop volumineux (5 Mo maximum).';
+            return;
+        }
+        dz.classList.remove('bad'); dz.classList.add('ok');
+        dzTitle.textContent = f.name;
+        dzSub.textContent = (f.size / 1024 / 1024).toFixed(2).replace('.', ',') + ' Mo, prêt à être archivé';
+        dzIcon.className = 'fa-solid fa-circle-check';
+    });
+    ['dragenter', 'dragover'].forEach(ev => dz.addEventListener(ev, () => dz.classList.add('drag')));
+    ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, () => dz.classList.remove('drag')));
+
+    form.addEventListener('submit', (e) => {
+        if (submitting) { e.preventDefault(); return; }
+        const errors = [];
+
+        if (libelle.value.trim().length < 3) errors.push(['libelle', 'Indiquez la désignation du diplôme (3 caractères minimum).']);
+        if (select.value === 'Autre' && !custom.value.trim()) errors.push(['niveau_custom', 'Précisez le niveau du diplôme.']);
+        const y = parseInt(annee.value, 10);
+        if (!y || y < 1950 || y > MAX_YEAR) errors.push(['annee', 'L’année doit être comprise entre 1950 et ' + MAX_YEAR + '.']);
+
+        if (errors.length) {
+            e.preventDefault();
+            errors.forEach(([n, m]) => showError(n, m));
+            form.elements[errors[0][0]].focus();
+            return;
+        }
+        // Le formulaire part vers traitement_diplome.php ; on évite seulement le double envoi
+        submitting = true;
+        submitBtn.classList.add('loading');
+    });
+})();
+</script>
 </body>
 </html>

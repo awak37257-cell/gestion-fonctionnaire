@@ -1,10 +1,19 @@
 <?php
 session_start();
 require_once '../config.php';
+require_once '../includes/notifications.php';
 
 if ($_SERVER["REQUEST_METHOD"] == "POST") {
     
-    $id_f   = $_POST['id_f'];
+    $id_f   = (int)($_POST['id_fonc'] ?? $_POST['id_f'] ?? 0);
+    $role = strtolower(trim((string)($_SESSION['rol'] ?? '')));
+    $idSessionFonctionnaire = (int)($_SESSION['id_fonc'] ?? 0);
+    if (!hash_equals((string)($_SESSION['csrf_dipl'] ?? ''), (string)($_POST['csrf'] ?? ''))
+        || !$id_f || (!$idSessionFonctionnaire && !in_array($role, ['admin', 'admin_local'], true))
+        || ($idSessionFonctionnaire && $idSessionFonctionnaire !== $id_f && !in_array($role, ['admin', 'admin_local'], true))) {
+        http_response_code(403);
+        exit('Accès refusé.');
+    }
     $libelle = trim($_POST['libelle']);
     $niveau  = $_POST['niveau'];
     if ($niveau === 'Autre' && !empty($_POST['niveau_custom'])) {
@@ -14,6 +23,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $nom_fichier_final = null;
 
     try {
+        $stmtOrg = $db->prepare('SELECT id_org FROM RECEVOIR WHERE id_fonc = ? AND date_fin IS NULL');
+        $stmtOrg->execute([$id_f]);
+        $organisationsAgent = $stmtOrg->fetchAll(PDO::FETCH_COLUMN);
         $db->beginTransaction();
 
         // 1. Gestion de l'upload
@@ -62,6 +74,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 ':url'     => $nom_fichier_final
             ]);
         }
+
+        notifierAdministrateurs(
+            $db,
+            $id_f,
+            'diplome',
+            (int)$id_d,
+            'Nouveau diplôme déclaré',
+            $libelle . ' (' . $niveau . '), obtenu en ' . $annee,
+            array_map('intval', $organisationsAgent)
+        );
 
         $db->commit();
         header("Location: ../views/profil_agent.php?id=" . $id_f . "&section=diplome&msg=add_ok");

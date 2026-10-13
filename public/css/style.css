@@ -374,7 +374,13 @@ a {
 @media (max-width: 768px) {
     .main-header {
         padding: 0.75rem 4%;
+        gap: 0.75rem;
     }
+
+    .brand-container { min-width: 0; }
+    .brand-info { min-width: 0; }
+    .brand-info h1 { font-size: 0.95rem; }
+    .nav-actions { flex-wrap: wrap; justify-content: flex-end; }
 
     .brand-info p {
         display: none;
@@ -383,6 +389,26 @@ a {
     .search-input-group {
         padding-left: 1rem;
     }
+
+    .table-container { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .table-modern { min-width: 680px; }
+    .pagination-container { align-items: flex-start; }
+    .pagination { flex-wrap: wrap; }
+}
+
+@media (max-width: 480px) {
+    .main-header { align-items: flex-start; }
+    .brand-logo { width: 40px; height: 40px; flex: none; }
+    .brand-info h1 { font-size: 0.85rem; overflow-wrap: anywhere; }
+    .nav-actions { width: 100%; justify-content: stretch; }
+    .nav-actions .btn-custom { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 0.6rem 0.75rem; }
+    .main-content { padding: 1.5rem 4% !important; }
+    .search-input-group { flex-wrap: wrap; gap: 0.5rem; }
+    .search-input-group input { flex: 1 1 100%; min-width: 0; }
+    .search-input-group .btn-custom { width: 100%; justify-content: center; min-height: 44px; }
+    input, select, textarea { font-size: 16px; }
+    #toast-container { right: 16px; bottom: 16px; left: 16px; }
+    .toast { width: 100%; min-width: 0; }
 }
 
 /* ==========================================================================
@@ -514,4 +540,25 @@ a {
     font-size: 0.7rem;
     font-weight: 700;
     letter-spacing: 0.5px;
+}
+
+@media (max-width: 768px) {
+    .dashboard-layout { display: block; }
+    .main-admin-content { width: 100%; margin-left: 0; }
+    .sidebar-admin { max-width: min(280px, 86vw); }
+    .filter-grid { grid-template-columns: 1fr; }
+    .filter-actions { flex-wrap: wrap; }
+    .form-container { width: 100%; max-width: 100%; }
+    .grid-fields { grid-template-columns: 1fr; }
+    .form-section { padding: 16px; }
+    .pagination-container { align-items: flex-start; }
+}
+
+@media (max-width: 480px) {
+    .form-container { border-radius: 14px; }
+    .form-container .content { padding: 20px 16px; }
+    .form-container .header { padding: 22px 16px; }
+    .table-modern th, .table-modern td { padding: 0.75rem; }
+    .pagination { flex-wrap: wrap; }
+    .btn-custom { min-height: 42px; }
 }

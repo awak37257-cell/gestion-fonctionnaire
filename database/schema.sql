@@ -461,6 +461,23 @@ INSERT INTO `utilisateurs` (`id_user`, `iden`, `mot_de_pas`, `rol`, `id_fonc`, `
 (63, '045183A', '$2y$10$PD2lMcnKYFwmldliP/TTaumeSM9dPNFM.XtRrnp.ELeH8VfXtI0WC', 'AGENT', 52, 15),
 (70, '678543C', '$2y$10$1JoMyxTR4Gdi3SV3tn978.Trp1mZsnxFTzXbW284BEGwpdUdvZaq2', 'AGENT', 55, 19);
 
+CREATE TABLE IF NOT EXISTS `notifications` (
+  `id_notification` int NOT NULL AUTO_INCREMENT,
+  `id_user` int NOT NULL,
+  `id_fonc` int NOT NULL,
+  `type_element` enum('diplome','competence','mutation') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `id_element` int NOT NULL,
+  `id_org` int DEFAULT NULL,
+  `titre` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `details` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `statut` enum('a_verifier','verifie','supprime') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'a_verifier',
+  `date_creation` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `date_traitement` datetime DEFAULT NULL,
+  PRIMARY KEY (`id_notification`),
+  KEY `idx_notifications_user_statut` (`id_user`,`statut`,`date_creation`),
+  KEY `idx_notifications_element` (`type_element`,`id_element`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 --
 -- Contraintes pour les tables déchargées
 --

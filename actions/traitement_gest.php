@@ -44,7 +44,7 @@ try {
     
     $stmt1 = $db->prepare($sql1);
     $stmt1->execute([
-        ':iden' => $iden, // Contient l'email du gestionnaire
+        ':iden' => $iden,
         ':mdp'  => $mdp_hash,
         ':id_o' => $id_org
     ]);
