@@ -3,6 +3,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 require_once '../config.php';
+require_once '../includes/phone_numbers.php';
 
 // Helpers d'affichage
 if (!function_exists('e')) {
@@ -60,13 +61,19 @@ if (!$agent) {
     die("Agent introuvable.");
 }
 
+$regions_telephoniques = indicatifs_telephoniques();
+$telephone_decompose = decomposer_telephone((string)($agent['cont'] ?? ''));
+$indicatif_enregistre = $telephone_decompose['region'];
+$telephone_enregistre = $telephone_decompose['national'];
+
 // 3. TRAITEMENT DE LA MISE À JOUR
 $erreur = null;
 if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['id_fonc'])) {
     // Les valeurs sont stockées telles quelles : l'échappement HTML se fait uniquement à l'affichage
     $nom        = mb_strtoupper(trim($_POST['nom'] ?? ''), 'UTF-8');
     $prenoms    = trim($_POST['prenoms'] ?? '');
-    $contact    = trim($_POST['contact'] ?? '');
+    $regionTelephone = strtoupper(trim((string)($_POST['indicatif'] ?? '')));
+    $contact = numero_telephone_e164((string)($_POST['telephone'] ?? ''), $regionTelephone);
     $email      = trim($_POST['email'] ?? '');
     $date_naiss = trim($_POST['date_naissance'] ?? '');
     $genre      = $_POST['genre'] ?? '';
@@ -91,8 +98,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['id_fonc'])) {
     if (!$d || $d->format('Y-m-d') !== $date_naiss) {
         $erreurs[] = "La date de naissance n'est pas valide.";
     }
-    if ($contact === '' || $adresse === '') {
-        $erreurs[] = "Le téléphone et l'adresse sont obligatoires.";
+    if ($contact === null) {
+        $erreurs[] = "Le numéro de téléphone n'est pas valide pour le pays sélectionné.";
+        $contact = trim((string)($agent['cont'] ?? ''));
+    }
+    if ($adresse === '') {
+        $erreurs[] = "L'adresse est obligatoire.";
     }
     if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $erreurs[] = "L'adresse e-mail n'est pas valide.";
@@ -357,6 +368,10 @@ $retour_txt  = $est_admin ? 'Retour à la liste' : 'Retour à mon profil';
         .panel-sub { margin: 0; color: var(--muted); font-size: 12px; }
         .panel-body { padding: 22px 24px 24px; }
 
+        .tel-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 8px; }
+        .tel-row select, .tel-row input { min-width: 0; }
+        @media (max-width: 480px) { .tel-row { grid-template-columns: 1fr; } }
+
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 20px; }
         .full { grid-column: 1 / -1; }
         .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -546,8 +561,18 @@ $retour_txt  = $est_admin ? 'Retour à la liste' : 'Retour à mon profil';
             <div class="panel-body">
                 <div class="grid">
                     <div class="field">
-                        <label for="contact">Téléphone <span class="req">*</span></label>
-                        <input class="control" type="tel" id="contact" name="contact" value="<?= e($agent['cont'] ?? '') ?>" required autocomplete="tel">
+                        <label for="telephone">Téléphone <span class="req">*</span></label>
+                        <div class="tel-row">
+                            <select class="control" id="indicatif" name="indicatif" aria-label="Pays et indicatif">
+                                <?php foreach ($regions_telephoniques as $region): ?>
+                                    <option value="<?= e($region['region']) ?>" data-calling-code="<?= e($region['calling_code']) ?>" data-digits="<?= (int)$region['max_digits'] ?>" <?= $indicatif_enregistre === $region['region'] ? 'selected' : '' ?>>
+                                        <?= e($region['name']) ?> (<?= e($region['calling_code']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input class="control" type="tel" id="telephone" name="telephone" value="<?= e($telephone_enregistre) ?>" inputmode="numeric" maxlength="<?= (int)$regions_telephoniques[$indicatif_enregistre]['max_digits'] ?>" required autocomplete="tel-national">
+                        </div>
+                        <div class="hint" id="telephoneHint"><?= $indicatif_enregistre === 'CI' ? 'Côte d’Ivoire (+225) : le numéro doit commencer par 07, 01 ou 05.' : 'Indicatif ' . e($regions_telephoniques[$indicatif_enregistre]['calling_code']) . ' ; maximum ' . (int)$regions_telephoniques[$indicatif_enregistre]['max_digits'] . ' chiffres.' ?></div>
                     </div>
                     <div class="field">
                         <label for="email">E-mail personnel</label>
@@ -623,10 +648,39 @@ $retour_txt  = $est_admin ? 'Retour à la liste' : 'Retour à mon profil';
         const preview   = document.getElementById('photoPreview');
         const hint      = document.getElementById('photoHint');
         const submitBtn = document.getElementById('submitBtn');
+        const indicatif = document.getElementById('indicatif');
+        const telephone = document.getElementById('telephone');
+        const telephoneHint = document.getElementById('telephoneHint');
         const MAX_BYTES = 2 * 1024 * 1024;
         const TYPES = ['image/jpeg', 'image/png', 'image/webp'];
         const defaultPreview = preview.innerHTML;
         const defaultHint = hint.textContent;
+
+        function configurerTelephone() {
+            const longueur = Number(indicatif.selectedOptions[0]?.dataset.digits || 0);
+            telephone.maxLength = longueur;
+            telephone.value = telephone.value.replace(/\D/g, '').slice(0, longueur);
+            telephoneHint.textContent = indicatif.value === 'CI'
+                ? 'Côte d’Ivoire (+225) : le numéro doit commencer par 07, 01 ou 05.'
+                : 'Indicatif ' + indicatif.selectedOptions[0]?.dataset.callingCode + ' ; maximum ' + longueur + ' chiffres.';
+            verifierPrefixeTelephone();
+        }
+
+        function verifierPrefixeTelephone() {
+            const digits = telephone.value.replace(/\D/g, '');
+            const prefixeValide = indicatif.value !== 'CI' || digits.length < 2 || /^(07|01|05)/.test(digits);
+            telephoneHint.classList.toggle('bad', !prefixeValide);
+            if (!prefixeValide) telephoneHint.textContent = 'En Côte d’Ivoire, le numéro doit commencer par 07, 01 ou 05.';
+            return prefixeValide;
+        }
+
+        indicatif.addEventListener('change', configurerTelephone);
+        telephone.addEventListener('input', () => {
+            const longueur = Number(indicatif.selectedOptions[0]?.dataset.digits || 0);
+            telephone.value = telephone.value.replace(/\D/g, '').slice(0, longueur);
+            verifierPrefixeTelephone();
+        });
+        configurerTelephone();
 
         // Aperçu et contrôle de la photo
         fileInput.addEventListener('change', () => {
@@ -669,7 +723,15 @@ $retour_txt  = $est_admin ? 'Retour à la liste' : 'Retour à mon profil';
         });
 
         // Envoi : on bloque seulement le double clic
-        form.addEventListener('submit', () => {
+        form.addEventListener('submit', (event) => {
+            const digits = telephone.value.replace(/\D/g, '');
+            if (indicatif.value === 'CI' && digits.length >= 2 && !/^(07|01|05)/.test(digits)) {
+                event.preventDefault();
+                telephoneHint.classList.add('bad');
+                telephoneHint.textContent = 'En Côte d’Ivoire, le numéro doit commencer par 07, 01 ou 05.';
+                telephone.focus();
+                return;
+            }
             submitting = true;
             submitBtn.classList.add('loading');
             setTimeout(() => submitBtn.setAttribute('disabled', 'disabled'), 0);

@@ -1,39 +1,27 @@
 ﻿<?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
-
+session_start();
 require_once __DIR__ . '/../config.php';
 
-// Access Control
 if (!in_array($_SESSION['rol'] ?? '', ['admin', 'admin_local'], true) || empty($_SESSION['id_user'])) {
     header('Location: ../saisie/login.php');
     exit();
 }
 
-// CSRF Token Generation
 if (empty($_SESSION['csrf_notifications'])) {
     $_SESSION['csrf_notifications'] = bin2hex(random_bytes(32));
 }
 
 $user_role   = $_SESSION['rol'];
 $nom_session = $_SESSION['nom'] ?? 'Admin';
-$libelles_roles = [
-    'admin'       => 'Administrateur central',
-    'admin_local' => 'Administrateur local',
-    'consultant'  => 'Consultant',
-];
-$libelle_role = $libelles_roles[$user_role] ?? ucfirst($user_role);
 
-// Helper Functions
 $e = static fn($value) => htmlspecialchars((string)($value ?? ''), ENT_QUOTES, 'UTF-8');
-
 $initiales = static function ($nom) {
     $t = trim((string)$nom);
     return $t === '' ? '?' : mb_strtoupper(mb_substr($t, 0, 2, 'UTF-8'), 'UTF-8');
 };
 
-// Lien sûr vers un justificatif
+// Lien sûr vers un justificatif : on garde les sous-dossiers éventuels (ex. competences/xxx.pdf)
+// mais on retire tout segment vide, « . » ou « .. » avant d'encoder chaque partie.
 $lien_fichier = static function (string $base, string $chemin) {
     $parts = array_filter(
         explode('/', str_replace('\\', '/', $chemin)),
@@ -43,7 +31,6 @@ $lien_fichier = static function (string $base, string $chemin) {
     return $base . implode('/', array_map('rawurlencode', $parts));
 };
 
-// Fetch Notifications
 $stmt = $db->prepare("SELECT n.*, f.nom_fonc, f.prenom_fonc, f.matri, o.nom_org
     FROM NOTIFICATIONS n
     LEFT JOIN FONCTIONNAIRE f ON f.id_fonc = n.id_fonc
@@ -59,22 +46,13 @@ $types = [
     'competence' => ['Compétence', 'fa-award'],
     'mutation'   => ['Mutation',   'fa-route'],
 ];
-$statuts = [
-    'a_verifier' => 'À vérifier', 
-    'verifie'    => 'Vérifiée', 
-    'supprime'   => 'Élément supprimé'
-];
+$statuts = ['a_verifier' => 'À vérifier', 'verifie' => 'Vérifiée', 'supprime' => 'Élément supprimé'];
 
-// Initialisation et calcul des compteurs par statut
+// Compteurs par statut
 $compte = ['a_verifier' => 0, 'verifie' => 0, 'supprime' => 0];
 foreach ($notifications as $n) {
-    if (isset($compte[$n['statut']])) {
-        $compte[$n['statut']]++;
-    }
+    if (isset($compte[$n['statut']])) $compte[$n['statut']]++;
 }
-
-// Mise à jour de la variable pour le badge sidebar (APRES le calcul de $compte)
-$notifications_a_verifier = $compte['a_verifier'];
 
 $flash_ok = isset($_GET['success']) ? "L’opération a bien été enregistrée." : null;
 ?>
@@ -298,21 +276,65 @@ $flash_ok = isset($_GET['success']) ? "L’opération a bien été enregistrée.
 
 <div class="shell">
 
-    <?php
-    // Fonction initiales compatible avec l'include partagé
-    if (!function_exists('initiales')) {
-        function initiales($nom, $prenom = '') {
-            $a = mb_substr(trim((string)$nom), 0, 1, 'UTF-8');
-            $b = mb_substr(trim((string)$prenom), 0, 1, 'UTF-8');
-            return mb_strtoupper($a . $b, 'UTF-8') ?: '?';
-        }
-    }
-    if (!function_exists('e')) {
-        function e($v) { return htmlspecialchars((string)($v ?? ''), ENT_QUOTES, 'UTF-8'); }
-    }
-    $sidebar_page = 'notifications'; $sidebar_base = '';
-    require_once __DIR__ . '/../includes/sidebar_admin.php';
-    ?>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebarAdmin" aria-label="Navigation principale">
+        <div class="brand">
+            <div class="brand-mark"><i class="fa-solid fa-building-columns"></i></div>
+            <div>
+                <div class="brand-name">Ministère des Affaires étrangères</div>
+                <div class="brand-sub">Ressources humaines</div>
+            </div>
+        </div>
+
+        <nav class="nav">
+            <div class="nav-group">Général</div>
+            <a href="admin_dashboard.php" class="nav-link">
+                <i class="fa-solid fa-chart-pie"></i> Tableau de bord
+            </a>
+
+            <?php if ($user_role === 'admin'): ?>
+                <div class="nav-group">Administration</div>
+                <a href="../saisie/ajouter_gestionnaire.php" class="nav-link">
+                    <i class="fa-solid fa-user-shield"></i> Créer un accès local
+                </a>
+                <a href="../saisie/ajouter_direction.php" class="nav-link">
+                    <i class="fa-solid fa-sitemap"></i> Gérer les directions
+                </a>
+                <a href="admin_historique.php" class="nav-link">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Historique des actions
+                </a>
+            <?php endif; ?>
+
+            <div class="nav-group">Ressources humaines</div>
+            <a href="liste_fonctionnaires.php" class="nav-link">
+                <i class="fa-solid fa-table-list"></i> Liste complète
+            </a>
+            <a href="../saisie/ajouter_agent.php" class="nav-link">
+                <i class="fa-solid fa-user-plus"></i> Nouveau fonctionnaire
+            </a>
+            <a href="gestion_documents.php" class="nav-link">
+                <i class="fa-solid fa-folder-open"></i> Archive des documents
+            </a>
+            <a href="<?= $e(basename($_SERVER['SCRIPT_NAME'])) ?>" class="nav-link active" aria-current="page">
+                <i class="fa-solid fa-clipboard-check"></i> Déclarations à vérifier
+                <?php if ($compte['a_verifier'] > 0): ?><span class="nav-count"><?= (int)$compte['a_verifier'] ?></span><?php endif; ?>
+            </a>
+
+            <div class="nav-group">Mon compte</div>
+            <a href="modifier_mdp.php" class="nav-link">
+                <i class="fa-solid fa-lock"></i> Sécurité et mot de passe
+            </a>
+        </nav>
+
+        <div class="sidebar-user">
+            <div class="avatar"><?= $e($initiales($nom_session)) ?></div>
+            <div>
+                <div class="name"><?= $e($nom_session) ?></div>
+                <div class="role"><?= $user_role === 'admin' ? 'Administrateur central' : 'Administrateur local' ?></div>
+            </div>
+        </div>
+    </aside>
+    <div class="overlay" id="overlay"></div>
 
     <main class="main">
 

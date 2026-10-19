@@ -78,9 +78,10 @@ if ($user_role === 'admin_local' && $user_org_id) {
 
     // Liste des administrateurs
     $liste_admins_locaux = $db->query("
-        SELECT u.iden, o.nom_org, g.nom_gest, g.prenom_gest, g.email_gest
+        SELECT u.iden, o.nom_org, f.nom_fonc, f.prenom_fonc, g.nom_gest, g.prenom_gest, g.email_gest
         FROM UTILISATEURS u
         LEFT JOIN ORGANISATION o ON u.id_org = o.id_org
+        LEFT JOIN FONCTIONNAIRE f ON u.id_fonc = f.id_fonc
         LEFT JOIN GESTIONNAIRE g ON u.id_user = g.id_user
         WHERE u.rol = 'admin_local'
         ORDER BY o.nom_org ASC
@@ -144,11 +145,17 @@ $prenom_session = $_SESSION['nom'] ?? 'Admin';
 $nom_session      = $prenom_session; // alias pour le sidebar partagé
 $nom_affichage_session = $prenom_session;
 if ($user_role === 'admin_local' && isset($_SESSION['id_user'])) {
-    $stmtGestionnaire = $db->prepare("SELECT nom_gest, prenom_gest FROM GESTIONNAIRE WHERE id_user = ?");
+    $stmtGestionnaire = $db->prepare("SELECT f.nom_fonc, f.prenom_fonc, g.nom_gest, g.prenom_gest
+        FROM UTILISATEURS u
+        LEFT JOIN FONCTIONNAIRE f ON f.id_fonc = u.id_fonc
+        LEFT JOIN GESTIONNAIRE g ON g.id_user = u.id_user
+        WHERE u.id_user = ?");
     $stmtGestionnaire->execute([$_SESSION['id_user']]);
     $gestionnaire = $stmtGestionnaire->fetch();
     if ($gestionnaire) {
-        $nom_affichage_session = trim(($gestionnaire['prenom_gest'] ?? '') . ' ' . $gestionnaire['nom_gest']);
+        $prenom_admin_local = $gestionnaire['prenom_fonc'] ?: $gestionnaire['prenom_gest'];
+        $nom_admin_local = $gestionnaire['nom_fonc'] ?: $gestionnaire['nom_gest'];
+        $nom_affichage_session = trim(($prenom_admin_local ?? '') . ' ' . ($nom_admin_local ?? ''));
     }
 }
 ?>
@@ -883,11 +890,13 @@ if ($user_role === 'admin_local' && isset($_SESSION['id_user'])) {
                         <h2 class="panel-title" id="adminsTitre">Administrateurs locaux</h2>
                         <ul class="list">
                             <?php foreach ($liste_admins_locaux as $ad):
-                                $nom_complet = trim(($ad['prenom_gest'] ?? '') . ' ' . ($ad['nom_gest'] ?? ''));
+                                $prenom_admin_local = $ad['prenom_fonc'] ?: $ad['prenom_gest'];
+                                $nom_admin_local = $ad['nom_fonc'] ?: $ad['nom_gest'];
+                                $nom_complet = trim(($prenom_admin_local ?? '') . ' ' . ($nom_admin_local ?? ''));
                             ?>
                             <li>
                                 <div class="row">
-                                    <div class="avatar sm"><?php echo e(initiales($ad['nom_gest'] ?? $ad['iden'], $ad['prenom_gest'] ?? '')); ?></div>
+                                    <div class="avatar sm"><?php echo e(initiales($nom_admin_local ?: $ad['iden'], $prenom_admin_local ?? '')); ?></div>
                                     <div class="list-main">
                                         <div class="list-title"><?php echo e($nom_complet !== '' ? $nom_complet : $ad['iden']); ?></div>
                                         <div class="list-sub"><?php echo e($ad['nom_org'] ?? 'Sans organisation'); ?></div>

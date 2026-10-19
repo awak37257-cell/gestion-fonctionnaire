@@ -26,6 +26,22 @@ if (!function_exists('fmt_date')) {
 $role       = isset($_SESSION['rol']) ? strtolower(trim($_SESSION['rol'])) : '';
 $id_session = isset($_SESSION['id_fonc']) ? (int)$_SESSION['id_fonc'] : 0;
 $id_agent   = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$idUserSession = (int)($_SESSION['id_user'] ?? $_SESSION['user_id'] ?? 0);
+$compteAdminLocal = null;
+
+if ($idUserSession > 0) {
+    $stmtCompte = $db->prepare("SELECT id_user, id_fonc, id_org FROM UTILISATEURS WHERE id_user = ? AND rol = 'admin_local'");
+    $stmtCompte->execute([$idUserSession]);
+    $compteAdminLocal = $stmtCompte->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+if ($id_session < 1 && $compteAdminLocal) {
+    $id_session = (int)$compteAdminLocal['id_fonc'];
+}
+if ($compteAdminLocal && empty($_SESSION['csrf_mode'])) {
+    $_SESSION['csrf_mode'] = bin2hex(random_bytes(32));
+}
+$peutBasculerAdmin = $compteAdminLocal && (int)$compteAdminLocal['id_fonc'] > 0;
 
 // Aucune session : retour à la connexion
 if ($role === '' && $id_session === 0) {
@@ -41,6 +57,16 @@ if (!$id_agent && $id_session) {
 $est_admin      = in_array($role, ['admin', 'admin_local'], true);
 $role_lecture   = $est_admin || in_array($role, ['consultant', 'gestionnaire'], true);
 $est_mon_profil = ($id_session > 0 && $id_session === $id_agent);
+
+if ($role === 'admin_local' && !$est_mon_profil) {
+    $idOrgSession = (int)($_SESSION['id_org'] ?? 0);
+    $stmtAcces = $db->prepare('SELECT 1 FROM RECEVOIR WHERE id_fonc = ? AND id_org = ? AND date_fin IS NULL LIMIT 1');
+    $stmtAcces->execute([$id_agent, $idOrgSession]);
+    if (!$idOrgSession || !$stmtAcces->fetchColumn()) {
+        http_response_code(403);
+        exit('Vous ne pouvez consulter que les dossiers des fonctionnaires de votre organisation.');
+    }
+}
 
 // Un agent ne peut consulter que sa propre fiche
 if (!$role_lecture && !$est_mon_profil) {
@@ -132,7 +158,24 @@ if ($agent) {
     }
 }
 
-$nom_session  = $_SESSION['nom'] ?? 'Utilisateur';
+$nom_session = trim((string)($_SESSION['nom'] ?? ''));
+$avatar_nom = '';
+$avatar_prenom = '';
+if ($idUserSession > 0) {
+    $stmtIdentiteSession = $db->prepare('SELECT f.nom_fonc, f.prenom_fonc
+        FROM UTILISATEURS u
+        LEFT JOIN FONCTIONNAIRE f ON f.id_fonc = u.id_fonc
+        WHERE u.id_user = ? LIMIT 1');
+    $stmtIdentiteSession->execute([$idUserSession]);
+    $identiteSession = $stmtIdentiteSession->fetch(PDO::FETCH_ASSOC) ?: [];
+    $avatar_nom = trim((string)($identiteSession['nom_fonc'] ?? ''));
+    $avatar_prenom = trim((string)($identiteSession['prenom_fonc'] ?? ''));
+    $nomFonctionnaireSession = trim($avatar_prenom . ' ' . $avatar_nom);
+    if ($nomFonctionnaireSession !== '') {
+        $nom_session = $nomFonctionnaireSession;
+    }
+}
+$nom_session = $nom_session !== '' ? $nom_session : 'Utilisateur';
 $base         = '?id=' . (int)$id_agent . '&section=';
 $ville_agent  = $agent ? (!empty($agent['ville_affec']) ? $agent['ville_affec'] : ($agent['vil_affec'] ?? null)) : null;
 $nom_complet  = $agent ? trim(($agent['prenom_fonc'] ?? '') . ' ' . mb_strtoupper((string)($agent['nom_fonc'] ?? ''), 'UTF-8')) : '';
@@ -495,13 +538,23 @@ $photo_ok     = $agent && !empty($agent['photo_fonc']) && file_exists(__DIR__ . 
             <?php endif; ?>
 
             <div class="nav-group">Mon compte</div>
+            <?php if ($peutBasculerAdmin): ?>
+                <form method="post" action="changer_mode.php">
+                    <input type="hidden" name="csrf" value="<?= e($_SESSION['csrf_mode']) ?>">
+                    <input type="hidden" name="mode" value="<?= $role === 'admin_local' ? 'fonctionnaire' : 'admin_local' ?>">
+                    <button type="submit" class="nav-link" style="width:100%;border:0;background:transparent;text-align:left;font:inherit;cursor:pointer;">
+                        <i class="fa-solid <?= $role === 'admin_local' ? 'fa-id-card' : 'fa-user-shield' ?>"></i>
+                        <?= $role === 'admin_local' ? 'Espace fonctionnaire' : 'Espace administrateur local' ?>
+                    </button>
+                </form>
+            <?php endif; ?>
             <a href="modifier_mdp.php" class="nav-link">
                 <i class="fa-solid fa-lock"></i> Sécurité et mot de passe
             </a>
         </nav>
 
         <div class="sidebar-user">
-            <div class="avatar"><?= e(initiales($nom_session)) ?></div>
+            <div class="avatar"><?= e(initiales($avatar_nom !== '' ? $avatar_nom : $nom_session, $avatar_prenom)) ?></div>
             <div>
                 <div class="name"><?= e($nom_session) ?></div>
                 <div class="role"><?= $est_admin ? ($role === 'admin' ? 'Administrateur central' : 'Administrateur local') : ($role === 'consultant' ? 'Consultant' : 'Agent') ?></div>

@@ -30,9 +30,13 @@ if (!function_exists('initiales')) {
 }
 
 // Récupération des 100 derniers logs avec jointure
-$stmt = $db->query("SELECT l.*, u.iden, u.rol
+$stmt = $db->query("SELECT l.*, u.iden, u.rol,
+        f.nom_fonc, f.prenom_fonc,
+        g.nom_gest, g.prenom_gest
                     FROM HISTORIQUE l
                     LEFT JOIN UTILISATEURS u ON l.id_user = u.id_user
+                    LEFT JOIN FONCTIONNAIRE f ON u.id_fonc = f.id_fonc
+                    LEFT JOIN GESTIONNAIRE g ON g.id_user = u.id_user
                     ORDER BY l.dat_hist DESC LIMIT 100");
 $rows = $stmt->fetchAll();
 
@@ -42,15 +46,24 @@ $total_actions_today = $db->query("SELECT COUNT(*) FROM HISTORIQUE WHERE DATE(da
 
 // Top 5 utilisateurs les plus actifs
 $top_users = $db->query("
-    SELECT u.iden, COUNT(*) as action_count
+    SELECT u.iden, f.nom_fonc, f.prenom_fonc, g.nom_gest, g.prenom_gest,
+           COUNT(*) AS action_count
     FROM HISTORIQUE l
     LEFT JOIN UTILISATEURS u ON l.id_user = u.id_user
-    GROUP BY l.id_user
+    LEFT JOIN FONCTIONNAIRE f ON u.id_fonc = f.id_fonc
+    LEFT JOIN GESTIONNAIRE g ON g.id_user = u.id_user
+    GROUP BY l.id_user, u.iden, f.nom_fonc, f.prenom_fonc, g.nom_gest, g.prenom_gest
     ORDER BY action_count DESC
     LIMIT 5
 ")->fetchAll();
 $top_max = 1;
-foreach ($top_users as $tu) { $top_max = max($top_max, (int)$tu['action_count']); }
+foreach ($top_users as &$tu) {
+    $prenomTop = $tu['prenom_fonc'] ?: ($tu['prenom_gest'] ?? '');
+    $nomTop = $tu['nom_fonc'] ?: ($tu['nom_gest'] ?? '');
+    $tu['nom_affiche'] = trim($prenomTop . ' ' . $nomTop) ?: ($tu['iden'] ?? 'Système');
+    $top_max = max($top_max, (int)$tu['action_count']);
+}
+unset($tu);
 
 // Préparation des logs : type d'action, rôle, date
 $types_meta = [
@@ -58,12 +71,15 @@ $types_meta = [
     'creation'     => ['label' => 'Créations',     'icon' => 'fa-plus'],
     'modification' => ['label' => 'Modifications', 'icon' => 'fa-pen'],
     'suppression'  => ['label' => 'Suppressions',  'icon' => 'fa-trash-can'],
+    'validation'   => ['label' => 'Validations',   'icon' => 'fa-circle-check'],
     'mutation'     => ['label' => 'Mutations',     'icon' => 'fa-arrows-rotate'],
     'autre'        => ['label' => 'Autres',        'icon' => 'fa-circle-info'],
 ];
 $roles_meta = [
     'admin'       => ['label' => 'Admin central', 'class' => 'r-admin'],
     'admin_local' => ['label' => 'Admin local',   'class' => 'r-local'],
+    'AGENT'       => ['label' => 'Fonctionnaire', 'class' => 'r-agent'],
+    'agent'       => ['label' => 'Fonctionnaire', 'class' => 'r-agent'],
     'consultant'  => ['label' => 'Consultant',    'class' => 'r-consultant'],
 ];
 $compteurs = array_fill_keys(array_keys($types_meta), 0);
@@ -78,6 +94,8 @@ foreach ($rows as $row) {
         $type = 'connexion';
     } elseif (mb_strpos($desc_lower, 'suppr') !== false) {
         $type = 'suppression';
+    } elseif (mb_strpos($desc_lower, 'valid') !== false || mb_strpos($desc_lower, 'vérifi') !== false || mb_strpos($desc_lower, 'verifi') !== false) {
+        $type = 'validation';
     } elseif (mb_strpos($desc_lower, 'modif') !== false || mb_strpos($desc_lower, 'mise a jour') !== false || mb_strpos($desc_lower, 'mise à jour') !== false) {
         $type = 'modification';
     } elseif (mb_strpos($desc_lower, 'crea') !== false || mb_strpos($desc_lower, 'créa') !== false || mb_strpos($desc_lower, 'ajout') !== false) {
@@ -87,11 +105,10 @@ foreach ($rows as $row) {
     }
     $compteurs[$type]++;
 
-    if (!empty($row['nom_fonc']) || !empty($row['prenom_fonc'])) {
-        $qui = trim(($row['nom_fonc'] ?? '') . ' ' . ($row['prenom_fonc'] ?? ''));
-    } else {
-        $qui = $row['iden'] ?? 'Système';
-    }
+    $prenomUtilisateur = $row['prenom_fonc'] ?: ($row['prenom_gest'] ?? '');
+    $nomUtilisateur = $row['nom_fonc'] ?: ($row['nom_gest'] ?? '');
+    $qui = trim($prenomUtilisateur . ' ' . $nomUtilisateur);
+    if ($qui === '') $qui = $row['iden'] ?? 'Système';
 
     $ts = strtotime($row['dat_hist'] ?? $row['dat_log'] ?? 'now') ?: time();
 
@@ -361,6 +378,7 @@ foreach ($rows as $row) {
         .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
         .r-admin     { background: var(--red-soft);    color: #9B2C23; }
         .r-local     { background: var(--green-soft);  color: #0B7A51; }
+        .r-agent     { background: var(--blue-soft);   color: #1D4FBF; }
         .r-consultant{ background: var(--blue-soft);   color: #1D4FBF; }
         .r-auto      { background: var(--paper);       color: var(--muted); }
 
@@ -370,6 +388,7 @@ foreach ($rows as $row) {
         .t-creation     { background: var(--blue-soft);   color: var(--blue); }
         .t-modification { background: var(--amber-soft);  color: var(--amber); }
         .t-suppression  { background: var(--red-soft);    color: var(--red); }
+        .t-validation   { background: var(--green-soft);  color: var(--green); }
         .t-mutation     { background: var(--violet-soft); color: var(--violet); }
         .t-autre        { background: var(--paper);       color: var(--muted); }
         .act-text { min-width: 220px; }
@@ -592,7 +611,7 @@ foreach ($rows as $row) {
                             <li>
                                 <div class="rank-top">
                                     <span class="rank-pos"><?php echo $pos++; ?></span>
-                                    <span class="rank-name"><?php echo e($tu['iden'] ?? 'Système'); ?></span>
+                                    <span class="rank-name"><?php echo e($tu['nom_affiche']); ?></span>
                                     <span class="rank-count"><?php echo (int)$tu['action_count']; ?></span>
                                 </div>
                                 <div class="bar" aria-hidden="true"><span style="width: <?php echo round(((int)$tu['action_count'] / $top_max) * 100); ?>%;"></span></div>

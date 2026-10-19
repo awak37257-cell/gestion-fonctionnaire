@@ -340,7 +340,7 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
             <div class="page-head">
                 <div>
                     <h1>Créer un accès local</h1>
-                    <p>Donnez à un gestionnaire l’accès aux agents d’une organisation.</p>
+                    <p>Désignez un fonctionnaire comme administrateur local de son organisation.</p>
                 </div>
                 <a href="../views/admin_dashboard.php" class="btn btn-light">
                     <i class="fa-solid fa-arrow-left"></i> Retour au tableau de bord
@@ -369,44 +369,10 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
 
                     <section class="panel">
                         <div class="panel-head">
-                            <div class="panel-ico"><i class="fa-solid fa-id-card-clip"></i></div>
-                            <div>
-                                <h2 class="panel-title">Identité du gestionnaire</h2>
-                                <p class="panel-sub">Les informations de la personne qui recevra l’accès</p>
-                            </div>
-                        </div>
-                        <div class="panel-body">
-                            <div class="fgrid">
-                                <div class="field">
-                                    <label for="nom_gest">Nom de famille <span class="req">*</span></label>
-                                    <input class="control" type="text" id="nom_gest" name="nom_gest" placeholder="Ex. : KOUASSI" autocomplete="off" required>
-                                    <span class="err" data-err="nom_gest"></span>
-                                </div>
-                                <div class="field">
-                                    <label for="prenom_gest">Prénoms <span class="req">*</span></label>
-                                    <input class="control" type="text" id="prenom_gest" name="prenom_gest" placeholder="Ex. : Bryan" autocomplete="off" required>
-                                    <span class="err" data-err="prenom_gest"></span>
-                                </div>
-                                <div class="field">
-                                    <label for="telephone_gest">Téléphone <span class="opt">facultatif</span></label>
-                                    <input class="control" type="tel" id="telephone_gest" name="telephone_gest" placeholder="07 01 02 03 04" autocomplete="off">
-                                    <span class="err" data-err="telephone_gest"></span>
-                                </div>
-                                <div class="field">
-                                    <label for="email_gest">E-mail professionnel <span class="req">*</span></label>
-                                    <input class="control" type="email" id="email_gest" name="email_gest" placeholder="prenom.nom@ministere.ci" autocomplete="off" required>
-                                    <span class="err" data-err="email_gest"></span>
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-
-                    <section class="panel">
-                        <div class="panel-head">
                             <div class="panel-ico warm"><i class="fa-solid fa-key"></i></div>
                             <div>
-                                <h2 class="panel-title">Accès et sécurité</h2>
-                                <p class="panel-sub">Organisation concernée et mot de passe de départ</p>
+                                <h2 class="panel-title">Fonctionnaire et accès</h2>
+                                <p class="panel-sub">Choisissez l’organisation, puis le fonctionnaire qui en sera l’administrateur local</p>
                             </div>
                         </div>
                         <div class="panel-body">
@@ -422,6 +388,20 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
                                         <?php endforeach; ?>
                                     </select>
                                     <span class="err" data-err="id_org"></span>
+                                </div>
+
+                                <div class="field full">
+                                    <label for="id_fonc">Fonctionnaire de l’organisation <span class="req">*</span></label>
+                                    <select class="control" id="id_fonc" name="id_fonc" required disabled>
+                                        <option value="">Choisissez d’abord une organisation</option>
+                                    </select>
+                                    <span class="hint" id="fonctionnaireHint">Seuls les fonctionnaires actuellement affectés à cette organisation et ayant un e-mail valide sont proposés.</span>
+                                    <span class="err" data-err="id_fonc"></span>
+                                </div>
+
+                                <div class="field full">
+                                    <label for="iden_preview">E-mail et identifiant de connexion</label>
+                                    <input class="control" type="text" id="iden_preview" value="Choisissez un fonctionnaire" readonly>
                                 </div>
 
                                 <div class="field full">
@@ -456,7 +436,7 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
                     <ul>
                         <li>
                             <i class="fa-solid fa-sitemap"></i>
-                            <div><strong>Un accès par organisation</strong>Le gestionnaire est rattaché à l’organisation choisie ici.</div>
+                            <div><strong>Un accès lié au fonctionnaire</strong>Le compte conserve le matricule et le profil de la personne choisie.</div>
                         </li>
                         <li>
                             <i class="fa-solid fa-paper-plane"></i>
@@ -539,7 +519,51 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
     // ---------- Validation ----------
     const form = document.getElementById('gestForm');
     const submitBtn = document.getElementById('submitBtn');
+    const orgSelect = document.getElementById('id_org');
+    const fonctionnaireSelect = document.getElementById('id_fonc');
+    const loginPreview = document.getElementById('iden_preview');
+    const fonctionnaireHint = document.getElementById('fonctionnaireHint');
     let submitting = false;
+    let fonctionnaireRequest = 0;
+
+    orgSelect.addEventListener('change', async () => {
+        const request = ++fonctionnaireRequest;
+        fonctionnaireSelect.disabled = true;
+        fonctionnaireSelect.innerHTML = '<option value="">Chargement des fonctionnaires...</option>';
+        loginPreview.value = 'Choisissez un fonctionnaire';
+        fonctionnaireHint.textContent = 'Seuls les fonctionnaires actuellement affectés à cette organisation et ayant un e-mail valide sont proposés.';
+        clearError('id_fonc');
+
+        if (!orgSelect.value) {
+            fonctionnaireSelect.innerHTML = '<option value="">Choisissez d’abord une organisation</option>';
+            return;
+        }
+
+        try {
+            const response = await fetch('get_fonctionnaires_org.php?id_org=' + encodeURIComponent(orgSelect.value), {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'text/html' }
+            });
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            const options = await response.text();
+            if (request !== fonctionnaireRequest) return;
+            fonctionnaireSelect.innerHTML = options;
+            fonctionnaireSelect.disabled = fonctionnaireSelect.options.length < 2;
+            if (fonctionnaireSelect.disabled) {
+                fonctionnaireHint.textContent = fonctionnaireSelect.options[0]?.textContent || 'Aucun fonctionnaire disponible.';
+            }
+        } catch (error) {
+            if (request !== fonctionnaireRequest) return;
+            fonctionnaireSelect.innerHTML = '<option value="">Chargement impossible</option>';
+            fonctionnaireHint.textContent = 'Impossible de charger la liste. Réessayez en sélectionnant l’organisation.';
+        }
+    });
+
+    fonctionnaireSelect.addEventListener('change', () => {
+        const option = fonctionnaireSelect.selectedOptions[0];
+        loginPreview.value = option?.dataset.login || 'Choisissez un fonctionnaire';
+        clearError('id_fonc');
+    });
 
     function showError(name, msg) {
         const box = form.querySelector('[data-err="' + name + '"]');
@@ -553,7 +577,7 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
         if (box) box.textContent = '';
         if (input) input.classList.remove('bad');
     }
-    ['nom_gest', 'prenom_gest', 'telephone_gest', 'email_gest', 'id_org', 'mdp'].forEach(n => {
+    ['id_org', 'id_fonc', 'mdp'].forEach(n => {
         const el = form.elements[n];
         el.addEventListener('input', () => clearError(n));
         el.addEventListener('change', () => clearError(n));
@@ -564,12 +588,8 @@ $directions = $db->query("SELECT id_org, nom_org, sigle_org FROM ORGANISATION OR
 
         const v = n => form.elements[n].value.trim();
         const errors = [];
-        if (!v('nom_gest')) errors.push(['nom_gest', 'Saisissez le nom de famille.']);
-        if (!v('prenom_gest')) errors.push(['prenom_gest', 'Saisissez les prénoms.']);
-        if (!v('email_gest')) errors.push(['email_gest', 'Saisissez l’adresse e-mail.']);
-        else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('email_gest'))) errors.push(['email_gest', 'Cette adresse e-mail n’est pas valide.']);
-        if (v('telephone_gest') && !/^[+()\d\s.-]{8,20}$/.test(v('telephone_gest'))) errors.push(['telephone_gest', 'Ce numéro de téléphone n’est pas valide.']);
         if (!form.elements.id_org.value) errors.push(['id_org', 'Choisissez une organisation.']);
+        if (!form.elements.id_fonc.value) errors.push(['id_fonc', 'Choisissez un fonctionnaire de cette organisation.']);
         if (pwd.value.length < 8) errors.push(['mdp', 'Le mot de passe doit contenir au moins 8 caractères.']);
 
         if (errors.length) {

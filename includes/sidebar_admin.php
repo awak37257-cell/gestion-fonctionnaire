@@ -42,6 +42,19 @@ if ($sidebar_base === '') {
     $v  = '../views/';
     $s  = '';         // on est dans saisie/ → chemin local
 }
+
+$profil_fonctionnaire_id = (int)($_SESSION['id_fonc'] ?? 0);
+if ($profil_fonctionnaire_id < 1 && $user_role === 'admin_local') {
+    $id_user_session = (int)($_SESSION['id_user'] ?? $_SESSION['user_id'] ?? 0);
+    if ($id_user_session > 0 && isset($db)) {
+        $stmtProfil = $db->prepare("SELECT id_fonc FROM UTILISATEURS WHERE id_user = ? AND rol = 'admin_local'");
+        $stmtProfil->execute([$id_user_session]);
+        $profil_fonctionnaire_id = (int)$stmtProfil->fetchColumn();
+    }
+}
+if ($user_role === 'admin_local' && $profil_fonctionnaire_id > 0 && empty($_SESSION['csrf_mode'])) {
+    $_SESSION['csrf_mode'] = bin2hex(random_bytes(32));
+}
 ?>
 <!-- Sidebar admin partagé -->
 <aside class="sidebar" id="sidebarAdmin" aria-label="Navigation principale">
@@ -92,6 +105,15 @@ if ($sidebar_base === '') {
         </a>
 
         <div class="nav-group">Mon compte</div>
+        <?php if ($user_role === 'admin_local' && $profil_fonctionnaire_id > 0): ?>
+            <form method="post" action="<?= $v ?>changer_mode.php">
+                <input type="hidden" name="csrf" value="<?= htmlspecialchars($_SESSION['csrf_mode'], ENT_QUOTES, 'UTF-8') ?>">
+                <input type="hidden" name="mode" value="fonctionnaire">
+                <button type="submit" class="nav-link" style="width:100%;border:0;background:transparent;text-align:left;font:inherit;cursor:pointer;">
+                    <i class="fa-solid fa-id-card"></i> Espace fonctionnaire
+                </button>
+            </form>
+        <?php endif; ?>
         <a href="<?= $v ?>modifier_mdp.php" class="<?= _sb_cls('modifier_mdp', $sidebar_page) ?>">
             <i class="fa-solid fa-lock"></i> Sécurité et mot de passe
         </a>

@@ -442,7 +442,7 @@ CREATE TABLE IF NOT EXISTS `utilisateurs` (
   `id_fonc` int DEFAULT NULL,
   `id_org` int DEFAULT NULL,
   PRIMARY KEY (`id_user`),
-  UNIQUE KEY `iden` (`iden`),
+  KEY `idx_utilisateurs_iden` (`iden`),
   KEY `fk_u_fonc` (`id_fonc`),
   KEY `fk_u_org` (`id_org`)
 ) ENGINE=InnoDB AUTO_INCREMENT=73 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -473,9 +473,23 @@ CREATE TABLE IF NOT EXISTS `notifications` (
   `statut` enum('a_verifier','verifie','supprime') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'a_verifier',
   `date_creation` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `date_traitement` datetime DEFAULT NULL,
+  `id_traiteur` int DEFAULT NULL,
   PRIMARY KEY (`id_notification`),
   KEY `idx_notifications_user_statut` (`id_user`,`statut`,`date_creation`),
   KEY `idx_notifications_element` (`type_element`,`id_element`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `password_reset_tokens` (
+  `id_reset` int NOT NULL AUTO_INCREMENT,
+  `id_user` int NOT NULL,
+  `token_hash` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  `date_creation` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `date_expiration` datetime NOT NULL,
+  `date_utilisation` datetime DEFAULT NULL,
+  PRIMARY KEY (`id_reset`),
+  UNIQUE KEY `uq_password_reset_token_hash` (`token_hash`),
+  KEY `idx_password_reset_user_expiry` (`id_user`,`date_expiration`),
+  CONSTRAINT `fk_password_reset_user` FOREIGN KEY (`id_user`) REFERENCES `utilisateurs` (`id_user`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --

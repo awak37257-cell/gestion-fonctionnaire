@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config.php';
+require_once '../includes/phone_numbers.php';
 
 // Protection : connexion obligatoire
 if (!isset($_SESSION['rol'])) {
@@ -48,6 +49,7 @@ if (empty($_SESSION['csrf_agent'])) {
     $_SESSION['csrf_agent'] = bin2hex(random_bytes(32));
 }
 $csrf = $_SESSION['csrf_agent'];
+$regions_telephoniques = indicatifs_telephoniques();
 
 // Admin global : toutes les organisations. Sinon : uniquement la sienne.
 $organisations = [];
@@ -687,17 +689,21 @@ $org_manquante = ($user_role !== 'admin' && !$nom_ma_structure);
         }
 
         .tel-row {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
             gap: 8px;
         }
 
         .tel-row select {
-            flex: 0 0 128px;
+            min-width: 0;
         }
 
         .tel-row input {
-            flex: 1;
             min-width: 0;
+        }
+
+        @media (max-width: 480px) {
+            .tel-row { grid-template-columns: 1fr; }
         }
 
         /* Photo */
@@ -1052,14 +1058,17 @@ $org_manquante = ($user_role !== 'admin' && !$nom_ma_structure);
                                     <div class="tel-row">
                                         <select class="control" name="indicatif" id="indicatif"
                                             aria-label="Indicatif du pays">
-                                            <option value="+225" selected>CI (+225)</option>
-                                            <option value="+221">SN (+221)</option>
-                                            <option value="+223">ML (+223)</option>
-                                            <option value="+226">BF (+226)</option>
+                                            <?php foreach ($regions_telephoniques as $region): ?>
+                                                <option value="<?= e($region['region']) ?>" data-calling-code="<?= e($region['calling_code']) ?>" data-digits="<?= (int)$region['max_digits'] ?>" <?= $region['region'] === 'CI' ? 'selected' : '' ?>>
+                                                    <?= e($region['name']) ?> (<?= e($region['calling_code']) ?>)
+                                                </option>
+                                            <?php endforeach; ?>
                                         </select>
                                         <input class="control" type="tel" name="telephone" id="telephone"
-                                            placeholder="07 08 09 10 11" autocomplete="off" required>
+                                            placeholder="Numéro national" inputmode="numeric" autocomplete="tel-national"
+                                            maxlength="15" required>
                                     </div>
+                                    <span class="hint" id="telephoneHint">Saisissez le numéro national ; sa validité sera vérifiée pour le pays choisi.</span>
                                     <span class="err" data-err="telephone"></span>
                                 </div>
                                 <div class="field">
@@ -1203,7 +1212,40 @@ $org_manquante = ($user_role !== 'admin' && !$nom_ma_structure);
 
             // ---------- Validation ----------
             const submitBtn = document.getElementById('submitBtn');
+            const indicatif = document.getElementById('indicatif');
+            const telephone = document.getElementById('telephone');
+            const telephoneHint = document.getElementById('telephoneHint');
             let submitting = false;
+
+            function configurerTelephone() {
+                const longueur = Number(indicatif.selectedOptions[0]?.dataset.digits || 0);
+                const estCoteDIvoire = indicatif.value === 'CI';
+                telephone.maxLength = longueur;
+                telephone.placeholder = 'Numéro national, max. ' + longueur + ' chiffres';
+                telephoneHint.textContent = estCoteDIvoire
+                    ? 'Côte d’Ivoire (+225) : le numéro doit commencer par 07, 01 ou 05.'
+                    : 'Indicatif ' + indicatif.selectedOptions[0]?.dataset.callingCode + ' ; maximum ' + longueur + ' chiffres.';
+                telephone.value = telephone.value.replace(/\D/g, '').slice(0, longueur);
+                verifierPrefixeTelephone();
+                clearError('telephone');
+            }
+
+            function verifierPrefixeTelephone() {
+                const digits = telephone.value.replace(/\D/g, '');
+                const prefixeValide = indicatif.value !== 'CI' || digits.length < 2 || /^(07|01|05)/.test(digits);
+                telephoneHint.classList.toggle('bad', !prefixeValide);
+                if (!prefixeValide) telephoneHint.textContent = 'En Côte d’Ivoire, le numéro doit commencer par 07, 01 ou 05.';
+                return prefixeValide;
+            }
+
+            indicatif.addEventListener('change', configurerTelephone);
+            telephone.addEventListener('input', () => {
+                const longueur = Number(indicatif.selectedOptions[0]?.dataset.digits || 0);
+                const valeur = telephone.value.replace(/\D/g, '').slice(0, longueur);
+                if (telephone.value !== valeur) telephone.value = valeur;
+                verifierPrefixeTelephone();
+            });
+            configurerTelephone();
 
             function showError(name, msg) {
                 const box = form.querySelector('[data-err="' + name + '"]');
@@ -1237,9 +1279,11 @@ $org_manquante = ($user_role !== 'admin' && !$nom_ma_structure);
                 else if (v('date_naissance') > new Date().toISOString().slice(0, 10)) errors.push(['date_naissance', 'La date de naissance ne peut pas être dans le futur.']);
                 if (!v('id_org')) errors.push(['id_org', 'Choisissez une direction.']);
                 if (!v('id_affec')) errors.push(['id_affec', 'Choisissez un grade.']);
-                const digits = v('telephone').replace(/[\s.\-()]/g, '');
+                const longueurTelephone = Number(indicatif.selectedOptions[0]?.dataset.digits || 0);
+                const digits = v('telephone').replace(/\D/g, '');
                 if (!digits) errors.push(['telephone', 'Saisissez le numéro de téléphone.']);
-                else if (!/^\d{8,12}$/.test(digits)) errors.push(['telephone', 'Ce numéro de téléphone n’est pas valide.']);
+                else if (!longueurTelephone || digits.length > longueurTelephone) errors.push(['telephone', 'Ce numéro dépasse la longueur autorisée pour le pays sélectionné.']);
+                else if (indicatif.value === 'CI' && !/^(07|01|05)/.test(digits)) errors.push(['telephone', 'En Côte d’Ivoire, le numéro doit commencer par 07, 01 ou 05.']);
                 if (v('email') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v('email'))) errors.push(['email', 'Cette adresse e-mail n’est pas valide.']);
                 if (!v('adresse')) errors.push(['adresse', 'Saisissez l’adresse de résidence.']);
 

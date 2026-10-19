@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once '../config.php';
+require_once '../includes/phone_numbers.php';
 
 require '../libs/PHPMailer/Exception.php';
 require '../libs/PHPMailer/PHPMailer.php';
@@ -16,9 +17,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     $nom       = strtoupper(trim($_POST['nom']));
     $prenom    = ucwords(strtolower(trim($_POST['prenoms'])));
     
-    $indicatif = $_POST['indicatif'] ?? '+225'; 
-    $num_brut  = preg_replace('/\D/', '', $_POST['telephone']); 
-    $contact_complet = $indicatif . $num_brut;
+    $regionTelephone = strtoupper(trim((string)($_POST['indicatif'] ?? '')));
+    $numeroTelephone = numero_telephone_e164((string)($_POST['telephone'] ?? ''), $regionTelephone);
+    if ($numeroTelephone === null) {
+        header('Location: ../saisie/ajouter_agent.php?error=' . urlencode('Le numéro de téléphone n’est pas valide pour le pays sélectionné.'));
+        exit();
+    }
+    $contact_complet = $numeroTelephone;
 
     $date_naiss = $_POST['date_naissance']; 
     $genre      = $_POST['genre'];           

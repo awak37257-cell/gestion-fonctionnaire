@@ -15,40 +15,55 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
     try {
         $stmt = $db->prepare("
-            SELECT u.*, o.sigle_org
+                 SELECT u.*, o.sigle_org, f.matri, f.nom_fonc, f.prenom_fonc,
+                     r.id_org AS org_affectation_active
             FROM UTILISATEURS u
             LEFT JOIN ORGANISATION o ON u.id_org = o.id_org
-            WHERE u.iden = ?
+            LEFT JOIN FONCTIONNAIRE f ON f.id_fonc = u.id_fonc
+                 LEFT JOIN RECEVOIR r ON r.id_fonc = f.id_fonc AND r.date_fin IS NULL
+            WHERE u.iden = ? OR (u.rol = 'admin_local' AND f.matri = ?)
+            ORDER BY CASE WHEN u.iden = ? THEN 0 ELSE 1 END
         ");
-        $stmt->execute([$user_input]);
+        $stmt->execute([$user_input, $user_input, $user_input]);
         $comptes_trouves = $stmt->fetchAll();
 
-        $u = null;
+        $comptes_valides = [];
 
         foreach ($comptes_trouves as $compte) {
             $colonne_pwd = $compte['mot_de_pas'] ?? $compte['password'] ?? null;
 
             if ($colonne_pwd && password_verify($pass_input, $colonne_pwd)) {
-                $u = $compte;
-                break;
+                $comptes_valides[] = $compte;
             }
         }
+        $u = count($comptes_valides) === 1 ? $comptes_valides[0] : null;
 
         if ($u) {
+            $connexionParMatricule = strtolower((string)$u['rol']) === 'admin_local'
+                && strcasecmp(trim((string)($u['matri'] ?? '')), $user_input) === 0;
+            $roleSession = $connexionParMatricule ? 'AGENT' : $u['rol'];
+            $idOrgSession = $u['id_org'];
+            if (!empty($u['org_affectation_active'])) {
+                $idOrgSession = (int)$u['org_affectation_active'];
+                $stmtSyncOrg = $db->prepare('UPDATE UTILISATEURS SET id_org = ? WHERE id_user = ?');
+                $stmtSyncOrg->execute([$idOrgSession, (int)$u['id_user']]);
+            }
             session_regenerate_id(true);
 
             $_SESSION['id_user'] = $u['id_user'] ?? $u['id'];
-            $_SESSION['rol']     = $u['rol'];
-            $_SESSION['nom']     = $u['iden'];
+            $_SESSION['rol']     = $roleSession;
+            $_SESSION['nom']     = $connexionParMatricule
+                ? trim(($u['prenom_fonc'] ?? '') . ' ' . ($u['nom_fonc'] ?? ''))
+                : $u['iden'];
             $_SESSION['id_fonc'] = $u['id_fonc'] ?? null;
-            $_SESSION['id_org']  = $u['id_org'];
+            $_SESSION['id_org']  = $idOrgSession;
             $_SESSION['sigle']   = $u['sigle_org'];
 
             $action = "Connexion à la plateforme";
             $log = $db->prepare("INSERT INTO HISTORIQUE (id_user, action_desc, dat_hist) VALUES (?, ?, NOW())");
             $log->execute([$_SESSION['id_user'], $action]);
 
-            if (in_array($u['rol'], ['admin', 'admin_local', 'gestionnaire'])) {
+            if (in_array($roleSession, ['admin', 'admin_local', 'gestionnaire'])) {
                 header("Location: ../views/admin_dashboard.php");
             } else {
                 header("Location: ../views/profil_agent.php?id=" . (int)($u['id_fonc'] ?? 0));
@@ -57,7 +72,9 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         } else {
             sleep(1);
-            $error = "Identifiant ou mot de passe incorrect.";
+            $error = count($comptes_valides) > 1
+                ? "Plusieurs comptes correspondent à cet e-mail et ce mot de passe. Chaque compte doit avoir un mot de passe distinct."
+                : "Identifiant ou mot de passe incorrect.";
         }
     } catch (Exception $ex) {
         error_log("login.php : " . $ex->getMessage());
@@ -156,6 +173,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         .lead { margin: 8px 0 26px; color: var(--muted); }
 
         .alert { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; margin-bottom: 18px; border-radius: 10px; background: var(--red-soft); color: #8E2A22; border: 1px solid #F0C4BF; font-weight: 500; }
+        .alert.success { background: var(--green-soft); color: #14633F; border-color: #BFE3D0; }
         .alert i { margin-top: 3px; }
 
         .field { margin-bottom: 18px; }
@@ -199,6 +217,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 
         .foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
         .foot i { color: var(--green); margin-right: 6px; }
+        .forgot-link { display: inline-flex; margin-top: 16px; color: var(--ink-2); font-size: 13px; font-weight: 700; }
+        .forgot-link:hover { color: var(--accent-dark); }
         .back { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; transition: color .15s; }
         .back:hover { color: var(--text); }
 
@@ -242,6 +262,13 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         <h1>Connexion</h1>
         <p class="lead">Saisissez vos identifiants pour accéder à votre espace.</p>
 
+        <?php if (($_GET['reset'] ?? '') === 'success'): ?>
+            <div class="alert success" role="status">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>Votre mot de passe a été modifié. Vous pouvez vous connecter.</span>
+            </div>
+        <?php endif; ?>
+
         <?php if ($error): ?>
             <div class="alert" role="alert">
                 <i class="fa-solid fa-circle-exclamation"></i>
@@ -254,7 +281,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <label for="iden">Identifiant ou matricule</label>
                 <div class="control-wrap">
                     <i class="fa-solid fa-user lead-ico"></i>
-                    <input type="text" id="iden" name="iden" class="control" value="<?= e($user_input) ?>" placeholder="Votre identifiant" autocomplete="username" autocapitalize="none" spellcheck="false" required <?= $error ? '' : 'autofocus' ?>>
+                    <input type="text" id="iden" name="iden" class="control" value="<?= e($user_input) ?>" placeholder="E-mail admin local ou matricule fonctionnaire" autocomplete="username" autocapitalize="none" spellcheck="false" required <?= $error ? '' : 'autofocus' ?>>
                 </div>
             </div>
 
@@ -274,6 +301,8 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 <span>Se connecter</span>
             </button>
         </form>
+
+        <a class="forgot-link" href="mot_de_passe_oublie.php">Mot de passe oublié ?</a>
 
         <div class="foot">
             <span><i class="fa-solid fa-shield-halved"></i> Accès réservé au personnel autorisé. Les connexions sont enregistrées.</span>

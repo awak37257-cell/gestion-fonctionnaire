@@ -461,18 +461,17 @@ if (isset($_GET['success'])) {
                             </div>
 
                             <div class="field">
-                                <label for="sta_post">Statut du poste <span class="req">*</span></label>
+                                <label for="sta_post">Statut d’emploi <span class="req">*</span></label>
                                 <select class="control" id="sta_post" name="sta_post" required>
-                                    <optgroup label="Personnel régulier">
-                                        <option value="International (P)">International professionnel (P)</option>
-                                        <option value="Local (GS)">Agent local, service général (GS)</option>
-                                        <option value="Fixed-Term">Contrat à durée déterminée</option>
-                                    </optgroup>
-                                    <optgroup label="Autre personnel">
-                                        <option value="Consultant">Consultant international</option>
-                                        <option value="Volunteer">Volontaire</option>
-                                        <option value="Short-Term">Contrat de courte durée</option>
-                                    </optgroup>
+                                    <option value="fonctionnaire_titulaire">Fonctionnaire titulaire</option>
+                                    <option value="fonctionnaire_stagiaire">Fonctionnaire stagiaire</option>
+                                    <option value="agent_contractuel">Agent contractuel</option>
+                                    <option value="agent_temporaire">Agent temporaire</option>
+                                    <option value="agent_vacataire">Agent vacataire</option>
+                                    <option value="personnel_local">Personnel local</option>
+                                    <option value="personnel_international">Personnel international</option>
+                                    <option value="consultant">Consultant</option>
+                                    <option value="volontaire">Volontaire</option>
                                 </select>
                             </div>
 

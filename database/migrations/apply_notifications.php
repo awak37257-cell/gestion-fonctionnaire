@@ -11,4 +11,10 @@ if ($sql === false) {
 }
 
 $db->exec($sql);
+
+$colonneTraiteur = $db->query("SHOW COLUMNS FROM NOTIFICATIONS LIKE 'id_traiteur'")->fetch(PDO::FETCH_ASSOC);
+if (!$colonneTraiteur) {
+    $db->exec('ALTER TABLE NOTIFICATIONS ADD id_traiteur INT DEFAULT NULL AFTER date_traitement');
+}
+
 echo "La table NOTIFICATIONS est prête.\n";
